@@ -1,15 +1,55 @@
 import pandas as pd
 import numpy as np
-import sklearn
-from sklearn.linear_model import LinearRegression
+import math
+import re
 from sklearn.model_selection import train_test_split
-from sklearn import metrics
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler, LabelEncoder, PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
 import matplotlib.pyplot as plt
+import seaborn as sns
+import time
+import platform
+import psutil
+from tensorflow.python.keras.saving.saved_model.load import metrics
 
-# Đọc dữ liệu từ tệp CSV và tạo DataFrame
-df = pd.read_csv("Metro_Interstate_Traffic_Volume.csv", delimiter=",")  # đọc dữ liệu từ tệp
 
-# Tiền xử lý dữ liệu
+
+df = pd.read_csv("Metro_Interstate_Traffic_Volume.csv")
+print(df.head(10).to_string())# Tiền xử lý dữ liệu
+
+# Tóm lược dữ liệu (Đo mức độ tập trung & mức độ phân tán)
+description = df.describe()
+mode = df.select_dtypes(include=['float64','int64']).mode().iloc[0]
+mode.name = 'mode'
+median = df.select_dtypes(include=['float64','int64']).median()
+median.name = 'median'
+description = description._append(mode)
+description = description._append(median)
+print(description)
+
+# Kiểm tra data bị trùng
+duplicated_rows_data = df.duplicated().sum()
+print(f"\nSO LUONG DATA BI TRUNG LAP: {duplicated_rows_data}")
+data = df.drop_duplicates()
+
+# Kiểm tra tỷ lệ lỗi thiếu data
+data_na = (df.isnull().sum() / len(df)) * 100
+missing_data = pd.DataFrame({'Ty le thieu data': data_na})
+print(missing_data)
+
+# Quét qua các cột và đếm số lượng data riêng biệt
+print("\nSO LUONG CAC DATA RIENG BIET:")
+
+# Xem qua dataset
+print(f"\n5 DONG DAU DATA SET:\n {data.head(5)}")
+
+for column in data.columns:
+    num_distinct_values = len(data[column].unique())
+    print(f"{column}:{num_distinct_values} distinct values")
+
+
 def handel_missing_value(df):
     df_miss = df.columns[df.isna().sum() > 1]
     print(df_miss)
@@ -19,7 +59,6 @@ def handel_missing_value(df):
     print(df_numeric.to_string())
     df_cleaned = df_numeric.dropna()  # Xóa các dòng có giá trị khuyết
     return df_cleaned
-
 
 df_cleaned = handel_missing_value(df)
 
@@ -31,8 +70,58 @@ def Z_score_normalize(df_cleaned):
     normalized_data = (df_cleaned - mean) / std_dev
     return normalized_data
 
-# Chuẩn hóa dữ liệu
 data_after_preprocessing = Z_score_normalize(df_cleaned)
+
+df_numeric = df_cleaned.select_dtypes(include=['number'])
+
+plt.figure(figsize=(15, 10))
+for i, col in enumerate(df_numeric, 1):
+    plt.subplot(4, 3, i)
+    sns.boxplot(y=df_numeric[col], color='skyblue')
+    plt.title(f'Mức độ phân tán {col}')
+    plt.ylabel(col)
+plt.subplots_adjust(wspace=0.3, hspace=0.5)
+plt.show()
+
+# Vẽ histogram cho các thuộc tính kiểu số
+plt.figure(figsize=(15, 10))
+for i, col in enumerate(df_numeric, 1):
+    plt.subplot(4, 3, i)
+    # Điều chỉnh bins dựa trên đặc điểm của từng cột
+    if df_numeric[col].nunique() < 20:
+        bins = df_numeric[col].nunique()
+    elif df_numeric[col].max() - df_numeric[col].min() > 1000:
+        bins = 50
+    else:
+        bins = 30
+    sns.histplot(df_numeric[col], kde=True, bins=bins, color='skyblue')
+    plt.title(f'Biểu đồ histogram cho cột {col}')
+    plt.xlabel(col)
+    plt.ylabel('Frequency')
+plt.subplots_adjust(wspace=0.3, hspace=0.5)
+plt.show()
+
+# Chuyển đổi các cột phân loại sang dạng số bằng Label Encoding
+label_encoder = LabelEncoder()
+categorical_columns = ["holiday", "weather_main", ]
+
+# Tính hệ số tương quan giữa các thuộc tính và giá trị mục tiêu traffic_volume
+correlation_matrix = df_cleaned.corr()
+traffic_correlation = correlation_matrix["traffic_volume"].sort_values(ascending=False)
+print("\nTương quan của các thuộc tính với lưu lượng (traffic_volume):")
+print(traffic_correlation)
+
+# Vẽ biểu đồ scatter cho tất cả các thuộc tính với traffic_volume
+plt.figure(figsize=(20, 15))
+for i, col in enumerate(df_cleaned.columns[:-1], 1):
+    plt.subplot(5, 3, i)
+    sns.scatterplot(x=df_cleaned[col], y=df_cleaned["traffic_volume"], color='skyblue')
+    plt.title(f'Mối quan hệ giữa {col} và traffic_volume')
+    plt.xlabel(col)
+    plt.ylabel('traffic_volume')
+
+plt.subplots_adjust(wspace=0.3, hspace=0.5)
+plt.show()
 
 # Hàm hồi quy đơn biến
 def linear_regression_model_univariate(data_after_preprocessing):
